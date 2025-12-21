@@ -6,14 +6,15 @@ using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Threading;
+using Ionic.Zip;
 
 namespace SocietyManagerUpdater
 {
     class Program
     {
         // 🔑 CONFIGURE THESE BEFORE BUILDING 🔑
-        static readonly string UpdateBaseFileUrl = "https://YOUR_RENDER_APP.onrender.com/files/";
-        static readonly string CentralLogUrl = "https://YOUR_RENDER_APP.onrender.com/api/log";
+        static readonly string UpdateBaseFileUrl = "https://societymanagerdebugupdater.onrender.com/files/";
+        static readonly string CentralLogUrl = "https://societymanagerdebugupdater.onrender.com/api/log";
 
         static readonly string TargetBaseFolder = @"D:\SocietyManager";
         static readonly string TargetDebugFolder = @"D:\SocietyManager\Debug";
@@ -33,6 +34,19 @@ namespace SocietyManagerUpdater
         {
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)768 | (SecurityProtocolType)3072;
         }
+        public class SocietyInfo
+        {
+            public string SocietyCode { get; set; }
+            public string SocietyEnglishName { get; set; }
+            public string UnionName { get; set; }
+
+            public SocietyInfo(string code, string name, string union)
+            {
+                SocietyCode = code;
+                SocietyEnglishName = name;
+                UnionName = union;
+            }
+        }
 
         static void Main(string[] args)
         {
@@ -50,14 +64,15 @@ namespace SocietyManagerUpdater
             {
                 try
                 {
-                    var info = GetSocietyInfoFromLocalDb();
+                    SocietyInfo info = GetSocietyInfoFromLocalDb();
+                    
                     if (string.IsNullOrEmpty(info.SocietyCode))
                     {
                         Log("Could not get SocietyCode from local DB. Using default.");
-                        info = (SocietyCode: "DEFAULT", SocietyEnglishName: "Default Society", UnionName: "Porbandar");
+                        info = new SocietyInfo("DEFAULT", "Default Society", "Porbandar");
                     }
 
-                    string union = info.UnionName ?? "Porbandar";
+                    string union = info.UnionName ?? "Porbandar"; // ✅ Ab kaam karega
                     string versionFile = $"DebugSocietyManager_{union}_{DateTime.Today:ddMMyyyy}.zip";
                     string fullUrl = UpdateBaseFileUrl + versionFile;
 
@@ -82,7 +97,7 @@ namespace SocietyManagerUpdater
                                 ExtractWithBackup(union);
                                 LogUpdateToLocalHistory("Success", versionFile);
                                 SendLogToServer(info.SocietyCode, info.SocietyEnglishName, union, "Success", versionFile);
-                                
+
                                 if (firstRun) File.WriteAllText(FirstRunFlag, "done");
                                 if (isForce) File.WriteAllText(LastForceCheckFile, DateTime.Today.ToString("yyyy-MM-dd"));
                             }
@@ -107,7 +122,7 @@ namespace SocietyManagerUpdater
                 catch (Exception ex)
                 {
                     Log("Main loop error: " + ex.Message);
-                    Thread.Sleep(300000); // Wait 5 minutes
+                    Thread.Sleep(1000); // Wait 5 minutes
                 }
             }
         }
@@ -203,7 +218,14 @@ namespace SocietyManagerUpdater
             }
 
             Directory.CreateDirectory(TargetBaseFolder);
-            ZipFile.ExtractToDirectory(TempZipPath, TargetDebugFolder);
+            //ZipFile.ExtractToDirectory(TempZipPath, TargetDebugFolder);
+            using (ZipFile zip = ZipFile.Read(TempZipPath))
+            {
+                foreach (ZipEntry e in zip)
+                {
+                    e.Extract(TargetDebugFolder, ExtractExistingFileAction.OverwriteSilently);
+                }
+            }
             File.Delete(TempZipPath);
 
             // Launch main application
@@ -396,7 +418,7 @@ namespace SocietyManagerUpdater
         }
 
         // =============== SOCIETY INFO FROM LOCAL SQL ===============
-        static (string SocietyCode, string SocietyEnglishName, string UnionName) GetSocietyInfoFromLocalDb()
+        static SocietyInfo GetSocietyInfoFromLocalDb()
         {
             try
             {
@@ -409,17 +431,16 @@ namespace SocietyManagerUpdater
                         var reader = cmd.ExecuteReader();
                         if (reader.Read())
                         {
-                            return (
-                                reader["SocietyCode"]?.ToString(),
-                                reader["SocietyEnglishName"]?.ToString(),
-                                reader["UnionName"]?.ToString()
-                            );
+                            string code = reader["SocietyCode"]?.ToString();
+                            string name = reader["SocietyEnglishName"]?.ToString();
+                            string union = reader["UnionName"]?.ToString();
+                            return new SocietyInfo(code, name, union);
                         }
                     }
                 }
             }
             catch (Exception ex) { Log("SQL Error: " + ex.Message); }
-            return (null, null, null);
+            return new SocietyInfo(null, null, null);
         }
 
         // =============== SELF UPDATE ===============
