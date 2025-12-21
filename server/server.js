@@ -83,6 +83,7 @@ app.get('/admin', requireAuth, async (req, res) => {
           <option value="Sabar">Sabar</option>
           <option value="Bhavnagar">Bhavnagar</option>
           <option value="Porbandar">Porbandar</option>
+          <option value="Kachchh">Porbandar</option>
         </select>
         <input type="hidden" name="type" value="union">
         <button type="submit">Force Union Update</button>
