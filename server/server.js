@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const auth = require('basic-auth');
-const { connect } = require('@planetscale/database');
+const mysql = require('mysql2/promise'); // Changed from PlanetScale to MySQL
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -14,13 +14,29 @@ if (!fs.existsSync(path.join(__dirname, 'files'))) {
     fs.mkdirSync(path.join(__dirname, 'files'));
 }
 
-// PlanetScale connection
-const config = {
-  host: process.env.DB_HOST || 'localhost',
-  username: process.env.DB_USERNAME || 'root',
-  password: process.env.DB_PASSWORD || ''
+// Railway MySQL Connection Function (with SSL fix)
+const getDbConnection = async () => {
+  const config = {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USERNAME || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'society_updater',
+    port: process.env.DB_PORT || 3306,
+    connectTimeout: 10000,
+    // 👇 IMPORTANT: SSL certificate issue fix for Railway
+    ssl: {
+      rejectUnauthorized: false
+    }
+  };
+  
+  try {
+    const connection = await mysql.createConnection(config);
+    return connection;
+  } catch (error) {
+    console.error('MySQL Connection Error:', error.message);
+    throw error;
+  }
 };
-const conn = connect(config);
 
 // Admin auth middleware
 const requireAuth = (req, res, next) => {
@@ -35,10 +51,13 @@ const requireAuth = (req, res, next) => {
 // Serve admin panel
 app.get('/admin', requireAuth, async (req, res) => {
   try {
-    const societyQuery = "SELECT society_code, society_english_name, union_name FROM society_master ORDER BY union_name, society_english_name";
-    const societyResult = await conn.execute(societyQuery);
-    const societies = societyResult.rows || [];
-
+    const connection = await getDbConnection();
+    const [rows] = await connection.execute(
+      "SELECT society_code, society_english_name, union_name FROM society_master ORDER BY union_name, society_english_name"
+    );
+    await connection.end();
+    
+    const societies = rows || [];
     let societyOptions = societies.map(s => 
       `<option value="${s.society_code}">${s.union_name} - ${s.society_english_name} (${s.society_code})</option>`
     ).join('');
@@ -96,7 +115,7 @@ app.get('/admin', requireAuth, async (req, res) => {
     `);
   } catch (e) {
     console.error(e);
-    res.status(500).send('Database error');
+    res.status(500).send('Database error: ' + e.message);
   }
 });
 
@@ -125,53 +144,66 @@ app.post('/admin/force', requireAuth, async (req, res) => {
       return res.status(400).send('Invalid parameters');
     }
 
-    // Log to database
-    const logQuery = "INSERT INTO admin_actions (action_type, target_value, triggered_by) VALUES (?, ?, ?)";
-    await conn.execute(logQuery, [type, target, 'admin']);
+    // Log to Railway MySQL
+    const connection = await getDbConnection();
+    await connection.execute(
+      "INSERT INTO admin_actions (action_type, target_value, triggered_by) VALUES (?, ?, ?)",
+      [type, target, 'admin']
+    );
+    await connection.end();
 
     res.send(`${msg}! <a href="/admin">Back to Admin Panel</a>`);
   } catch (e) {
     console.error(e);
-    res.status(500).send('Server error');
+    res.status(500).send('Server error: ' + e.message);
   }
 });
 
 // API to receive client logs
 app.post('/api/log', async (req, res) => {
   try {
-    const { clientId, societyCode, societyName, unionName, status, errorMessage } = req.body;
-    const query = `
-      INSERT INTO central_debug_update_history 
+    const { clientId, societyCode, societyName, unionName, status, errorMessage, versionFileName } = req.body;
+    
+    const connection = await getDbConnection();
+    await connection.execute(
+      `INSERT INTO central_debug_update_history 
       (client_id, society_code, society_english_name, union_name, update_date, update_time, version_file_name, status, error_message)
-      VALUES (?, ?, ?, ?, CURDATE(), CURTIME(), ?, ?, ?)
-    `;
-    await conn.execute(query, [
-      clientId || 'unknown',
-      societyCode || null,
-      societyName || null,
-      unionName || null,
-      req.body.versionFileName || 'unknown',
-      status || 'logged',
-      errorMessage || null
-    ]);
+      VALUES (?, ?, ?, ?, CURDATE(), CURTIME(), ?, ?, ?)`,
+      [
+        clientId || 'unknown',
+        societyCode || null,
+        societyName || null,
+        unionName || null,
+        versionFileName || 'unknown',
+        status || 'logged',
+        errorMessage || null
+      ]
+    );
+    await connection.end();
+    
     res.json({ success: true });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Log failed' });
+    res.status(500).json({ error: 'Log failed: ' + e.message });
   }
 });
 
 // API to get recent logs
 app.get('/api/log', async (req, res) => {
   try {
-    const query = "SELECT * FROM admin_actions ORDER BY created_on DESC LIMIT 20";
-    const result = await conn.execute(query);
-    const logs = (result.rows || []).map(row => 
+    const connection = await getDbConnection();
+    const [rows] = await connection.execute(
+      "SELECT * FROM admin_actions ORDER BY created_on DESC LIMIT 20"
+    );
+    await connection.end();
+    
+    const logs = (rows || []).map(row => 
       `[${new Date(row.created_on).toLocaleString()}] ${row.action_type} → ${row.target_value}`
     ).join('<br>');
     res.send(logs);
   } catch (e) {
-    res.send('Log loading...');
+    console.error(e);
+    res.send('Log loading error: ' + e.message);
   }
 });
 
