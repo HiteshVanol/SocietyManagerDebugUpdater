@@ -45,7 +45,7 @@ const requireAuth = (req, res, next) => {
 };
 
 /* ---------------- FILE DOWNLOAD (IMPORTANT) ---------------- */
-app.get('/download/:file', (req, res) => {
+app.get('/files/:file', (req, res) => {
   const filePath = path.join(FILE_DIR, req.params.file);
 
   if (!fs.existsSync(filePath)) {
