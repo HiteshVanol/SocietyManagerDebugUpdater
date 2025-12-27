@@ -44,7 +44,7 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-/* ---------------- FILE DOWNLOAD (IMPORTANT) ---------------- */
+/* ---------------- FILE DOWNLOAD (UPDATER SAFE) ---------------- */
 app.get('/download/:file', (req, res) => {
   const filePath = path.join(FILE_DIR, req.params.file);
 
@@ -56,26 +56,42 @@ app.get('/download/:file', (req, res) => {
   const total = stat.size;
   const range = req.headers.range;
 
+  // 🔒 CRITICAL HEADERS (NO BYTE CHANGE)
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.file}"`);
   res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Encoding', 'identity'); // 🔥 MOST IMPORTANT
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
 
   if (range) {
     const parts = range.replace(/bytes=/, '').split('-');
     const start = parseInt(parts[0], 10);
     const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
 
+    // ❌ Invalid range protection
+    if (start >= total || end >= total) {
+      res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+      return;
+    }
+
     res.writeHead(206, {
       'Content-Range': `bytes ${start}-${end}/${total}`,
       'Content-Length': end - start + 1
     });
 
-    fs.createReadStream(filePath, { start, end }).pipe(res);
+    const stream = fs.createReadStream(filePath, { start, end });
+    stream.pipe(res);
   } else {
-    res.writeHead(200, { 'Content-Length': total });
-    fs.createReadStream(filePath).pipe(res);
+    res.writeHead(200, {
+      'Content-Length': total
+    });
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
   }
 });
+
 
 /* ---------------- ADMIN PANEL ---------------- */
 app.get('/admin', requireAuth, async (req, res) => {
