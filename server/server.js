@@ -4,6 +4,9 @@ const fs = require('fs');
 const auth = require('basic-auth');
 const mysql = require('mysql2/promise');
 const crypto = require('crypto');
+app.disable('etag');
+app.disable('x-powered-by');
+
 
 const app = express();
 
@@ -53,45 +56,15 @@ app.get('/download/:file', (req, res) => {
     return res.status(404).send('File not found');
   }
 
-  const stat = fs.statSync(filePath);
-  const total = stat.size;
-  const range = req.headers.range;
-
-  // 🔒 CRITICAL HEADERS (NO BYTE CHANGE)
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.file}"`);
+  res.setHeader('Content-Length', fs.statSync(filePath).size);
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Content-Encoding', 'identity'); // 🔥 MOST IMPORTANT
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Pragma', 'no-cache');
 
-  if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
-
-    // ❌ Invalid range protection
-    if (start >= total || end >= total) {
-      res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
-      return;
-    }
-
-    res.writeHead(206, {
-      'Content-Range': `bytes ${start}-${end}/${total}`,
-      'Content-Length': end - start + 1
-    });
-
-    const stream = fs.createReadStream(filePath, { start, end });
-    stream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      'Content-Length': total
-    });
-
-    const stream = fs.createReadStream(filePath);
-    stream.pipe(res);
-  }
+  const stream = fs.createReadStream(filePath);
+  stream.pipe(res);
 });
+
 
 
 /* ---------------- ADMIN PANEL ---------------- */
@@ -102,26 +75,16 @@ app.get('/admin', requireAuth, async (req, res) => {
 /* ---------------- FILE SHA API ---------------- */
 app.get('/api/file-sha/:file', (req, res) => {
   const filePath = path.join(FILE_DIR, req.params.file);
-
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'File not found' });
   }
 
   const hash = crypto.createHash('sha256');
-  const stream = fs.createReadStream(filePath);
-
-  stream.on('data', chunk => hash.update(chunk));
-  stream.on('end', () => {
-    res.json({
-      file: req.params.file,
-      sha256: hash.digest('hex')
-    });
-  });
-
-  stream.on('error', err => {
-    res.status(500).json({ error: err.message });
-  });
+  fs.createReadStream(filePath)
+    .on('data', d => hash.update(d))
+    .on('end', () => res.json({ sha256: hash.digest('hex') }));
 });
+
 
 
 /* ---------------- FORCE FLAGS ---------------- */
