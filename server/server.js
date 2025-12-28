@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const auth = require('basic-auth');
 const mysql = require('mysql2/promise');
+const crypto = require('crypto');
 
 const app = express();
 
@@ -97,6 +98,31 @@ app.get('/download/:file', (req, res) => {
 app.get('/admin', requireAuth, async (req, res) => {
   res.send('<h2>Updater Admin Running</h2>');
 });
+
+/* ---------------- FILE SHA API ---------------- */
+app.get('/api/file-sha/:file', (req, res) => {
+  const filePath = path.join(FILE_DIR, req.params.file);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  const hash = crypto.createHash('sha256');
+  const stream = fs.createReadStream(filePath);
+
+  stream.on('data', chunk => hash.update(chunk));
+  stream.on('end', () => {
+    res.json({
+      file: req.params.file,
+      sha256: hash.digest('hex')
+    });
+  });
+
+  stream.on('error', err => {
+    res.status(500).json({ error: err.message });
+  });
+});
+
 
 /* ---------------- FORCE FLAGS ---------------- */
 app.post('/admin/force', requireAuth, (req, res) => {
