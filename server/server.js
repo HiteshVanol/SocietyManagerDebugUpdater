@@ -4,8 +4,7 @@ const fs = require('fs');
 const auth = require('basic-auth');
 const mysql = require('mysql2/promise');
 const crypto = require('crypto');
-app.disable('etag');
-app.disable('x-powered-by');
+
 
 
 const app = express();
@@ -13,6 +12,8 @@ const app = express();
 /* ---------------- BASIC SETUP ---------------- */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.disable('etag');
+app.disable('x-powered-by');
 
 /* ---------------- FILE DIRECTORY ---------------- */
 const FILE_DIR = path.join(__dirname, 'files');
